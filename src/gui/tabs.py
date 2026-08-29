@@ -227,7 +227,9 @@ class LocalFilesTab(QWidget):
         logger.info("Validation feature coming soon")
     
     def on_organize_roms(self):
-        """Organize ROMs to output folder."""
+        """Organize ROMs to output folder with manufacturer/system structure."""
+        from src.core.system_map import get_manufacturer
+        
         if not self.output_directory:
             logger.warning("Please select an output folder first")
             return
@@ -238,18 +240,20 @@ class LocalFilesTab(QWidget):
         
         logger.info(f"Organizing ROMs to: {self.output_directory}")
         
-        # Create system-based subdirectories and copy files
+        # Create manufacturer/system subdirectories and copy files
         import shutil
         
         organized_count = 0
         for file_info in self.scanned_files:
             system = file_info.get('system', 'Unknown')
-            system_dir = os.path.join(self.output_directory, system)
+            manufacturer = get_manufacturer(system)
             
-            # Create system directory if it doesn't exist
+            # Create directory structure: Manufacturer/System
+            system_dir = os.path.join(self.output_directory, manufacturer, system)
+            
             os.makedirs(system_dir, exist_ok=True)
             
-            # Copy file to system directory
+            # Copy file to manufacturer/system directory
             try:
                 source_path = file_info['path']
                 dest_path = os.path.join(system_dir, file_info['filename'])
@@ -257,7 +261,9 @@ class LocalFilesTab(QWidget):
                 if not os.path.exists(dest_path):
                     shutil.copy2(source_path, dest_path)
                     organized_count += 1
-                    logger.info(f"Organized: {file_info['filename']} -> {system}/")
+                    logger.info(f"Organized: {file_info['filename']} -> {manufacturer}/{system}/")
+                else:
+                    logger.info(f"Skipped (already exists): {file_info['filename']}")
             except Exception as e:
                 logger.error(f"Error organizing {file_info['filename']}: {e}")
         
