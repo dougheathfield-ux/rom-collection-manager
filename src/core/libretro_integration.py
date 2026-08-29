@@ -26,6 +26,31 @@ class LibretroMetadataManager:
     REDUMP_DAT_LIST = f"{LIBRETRO_METADATA_LISTS}/Redump.txt"
     TOSEC_DAT_LIST = f"{LIBRETRO_METADATA_LISTS}/TOSEC.txt"
     
+    # Fallback systems if network fetch fails
+    FALLBACK_SYSTEMS = {
+        'No-Intro': {
+            'NES': {'name': 'NES', 'dat_collection': 'No-Intro'},
+            'SNES': {'name': 'SNES', 'dat_collection': 'No-Intro'},
+            'Genesis': {'name': 'Genesis', 'dat_collection': 'No-Intro'},
+            'Game Boy': {'name': 'Game Boy', 'dat_collection': 'No-Intro'},
+            'Game Boy Color': {'name': 'Game Boy Color', 'dat_collection': 'No-Intro'},
+            'Game Boy Advance': {'name': 'Game Boy Advance', 'dat_collection': 'No-Intro'},
+            'N64': {'name': 'N64', 'dat_collection': 'No-Intro'},
+            'Nintendo DS': {'name': 'Nintendo DS', 'dat_collection': 'No-Intro'},
+        },
+        'Redump': {
+            'PlayStation': {'name': 'PlayStation', 'dat_collection': 'Redump'},
+            'PlayStation 2': {'name': 'PlayStation 2', 'dat_collection': 'Redump'},
+            'Dreamcast': {'name': 'Dreamcast', 'dat_collection': 'Redump'},
+            'Saturn': {'name': 'Saturn', 'dat_collection': 'Redump'},
+        },
+        'TOSEC': {
+            'Atari 2600': {'name': 'Atari 2600', 'dat_collection': 'TOSEC'},
+            'Atari 7800': {'name': 'Atari 7800', 'dat_collection': 'TOSEC'},
+            'Arcade': {'name': 'Arcade', 'dat_collection': 'TOSEC'},
+        }
+    }
+    
     def __init__(self, cache_dir: Optional[str] = None):
         """
         Initialize Libretro metadata manager.
@@ -43,7 +68,13 @@ class LibretroMetadataManager:
         self.last_update = None
         self.cache_file = os.path.join(cache_dir, "systems_cache.json")
         
+        # Load cache first, then initialize with fallback if empty
         self._load_cache()
+        
+        # If no cache, use fallback systems
+        if not self.systems:
+            self.systems = self.FALLBACK_SYSTEMS.copy()
+            logger.info("Using fallback system lists")
     
     def fetch_nointro_systems(self) -> Dict[str, Dict]:
         """
@@ -99,22 +130,29 @@ class LibretroMetadataManager:
                     parts = line.split('|')
                     if len(parts) >= 1:
                         system_name = parts[0].strip()
-                        systems[system_name] = {
-                            'name': system_name,
-                            'dat_collection': dat_name,
-                            'dat_filename': parts[1].strip() if len(parts) > 1 else None,
-                            'fetched_at': datetime.now().isoformat()
-                        }
+                        if system_name:  # Only add non-empty names
+                            systems[system_name] = {
+                                'name': system_name,
+                                'dat_collection': dat_name,
+                                'dat_filename': parts[1].strip() if len(parts) > 1 else None,
+                                'fetched_at': datetime.now().isoformat()
+                            }
             
-            logger.info(f"Successfully fetched {len(systems)} {dat_name} systems")
+            if systems:
+                logger.info(f"Successfully fetched {len(systems)} {dat_name} systems")
+            else:
+                logger.warning(f"No systems found for {dat_name}, using fallback")
+                systems = self.FALLBACK_SYSTEMS.get(dat_name, {})
+            
             return systems
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching {dat_name} systems: {e}")
-            return {}
+            logger.info(f"Using fallback systems for {dat_name}")
+            return self.FALLBACK_SYSTEMS.get(dat_name, {})
         except Exception as e:
             logger.error(f"Error parsing {dat_name} systems: {e}")
-            return {}
+            return self.FALLBACK_SYSTEMS.get(dat_name, {})
     
     def refresh_all_systems(self) -> bool:
         """
@@ -124,10 +162,14 @@ class LibretroMetadataManager:
             True if refresh successful
         """
         try:
+            nointro = self.fetch_nointro_systems()
+            redump = self.fetch_redump_systems()
+            tosec = self.fetch_tosec_systems()
+            
             self.systems = {
-                'No-Intro': self.fetch_nointro_systems(),
-                'Redump': self.fetch_redump_systems(),
-                'TOSEC': self.fetch_tosec_systems(),
+                'No-Intro': nointro,
+                'Redump': redump,
+                'TOSEC': tosec,
             }
             
             self.last_update = datetime.now()
