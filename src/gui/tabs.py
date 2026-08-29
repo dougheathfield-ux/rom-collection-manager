@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem,
-    QFileDialog, QLabel, QSpinBox, QCheckBox, QComboBox
+    QFileDialog, QLabel, QSpinBox, QCheckBox, QComboBox, QGroupBox, QLineEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +19,52 @@ class LocalFilesTab(QWidget):
         """Initialize local files tab."""
         super().__init__()
         self.scanned_files = []
+        self.input_directory = ""
+        self.output_directory = ""
         self._setup_ui()
     
     def _setup_ui(self):
         """Setup UI elements."""
         layout = QVBoxLayout()
         
-        # Directory selection
+        # Input/Output folder selection group
+        folder_group = QGroupBox("ROM Folder Configuration")
+        folder_layout = QVBoxLayout()
+        
+        # Input folder
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel("Input Folder (ROMs to scan):"))
+        self.input_label = QLineEdit()
+        self.input_label.setReadOnly(True)
+        self.input_label.setPlaceholderText("No folder selected")
+        input_layout.addWidget(self.input_label)
+        input_browse_btn = QPushButton("Browse...")
+        input_browse_btn.clicked.connect(self.browse_input_directory)
+        input_layout.addWidget(input_browse_btn)
+        folder_layout.addLayout(input_layout)
+        
+        # Output folder
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("Output Folder (Organized ROMs):"))
+        self.output_label = QLineEdit()
+        self.output_label.setReadOnly(True)
+        self.output_label.setPlaceholderText("No folder selected")
+        output_layout.addWidget(self.output_label)
+        output_browse_btn = QPushButton("Browse...")
+        output_browse_btn.clicked.connect(self.browse_output_directory)
+        output_layout.addWidget(output_browse_btn)
+        folder_layout.addLayout(output_layout)
+        
+        folder_group.setLayout(folder_layout)
+        layout.addWidget(folder_group)
+        
+        # Directory selection (legacy, kept for compatibility)
         dir_layout = QHBoxLayout()
         self.dir_label = QLabel("No directory selected")
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self.browse_directory)
         
-        dir_layout.addWidget(QLabel("Directory:"))
+        dir_layout.addWidget(QLabel("Quick Scan Directory:"))
         dir_layout.addWidget(self.dir_label)
         dir_layout.addWidget(browse_btn)
         dir_layout.addStretch()
@@ -79,14 +113,42 @@ class LocalFilesTab(QWidget):
         validate_btn.clicked.connect(self.on_validate)
         action_layout.addWidget(validate_btn)
         
+        organize_btn = QPushButton("Organize to Output Folder")
+        organize_btn.clicked.connect(self.on_organize_roms)
+        action_layout.addWidget(organize_btn)
+        
         action_layout.addStretch()
         
         layout.addLayout(action_layout)
         
         self.setLayout(layout)
     
+    def browse_input_directory(self):
+        """Browse for input directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Input ROM Folder",
+            self.input_directory or os.path.expanduser("~")
+        )
+        if directory:
+            self.input_directory = directory
+            self.input_label.setText(directory)
+            logger.info(f"Input directory set to: {directory}")
+    
+    def browse_output_directory(self):
+        """Browse for output directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Output Folder for Organized ROMs",
+            self.output_directory or os.path.expanduser("~")
+        )
+        if directory:
+            self.output_directory = directory
+            self.output_label.setText(directory)
+            logger.info(f"Output directory set to: {directory}")
+    
     def browse_directory(self):
-        """Browse for directory."""
+        """Browse for directory (legacy)."""
         directory = QFileDialog.getExistingDirectory(self, "Select Directory")
         if directory:
             self.dir_label.setText(directory)
@@ -122,8 +184,12 @@ class LocalFilesTab(QWidget):
     
     def on_scan_clicked(self):
         """Handle scan button click."""
-        if self.dir_label.text() != "No directory selected":
+        if self.input_directory and self.input_directory != "No directory selected":
+            self.scan_directory(self.input_directory)
+        elif self.dir_label.text() != "No directory selected":
             self.scan_directory(self.dir_label.text())
+        else:
+            logger.warning("Please select a directory first")
     
     def on_calculate_crc(self):
         """Calculate CRC for selected files."""
@@ -160,6 +226,43 @@ class LocalFilesTab(QWidget):
         """Validate against DAT database."""
         logger.info("Validation feature coming soon")
     
+    def on_organize_roms(self):
+        """Organize ROMs to output folder."""
+        if not self.output_directory:
+            logger.warning("Please select an output folder first")
+            return
+        
+        if not self.scanned_files:
+            logger.warning("No ROM files to organize")
+            return
+        
+        logger.info(f"Organizing ROMs to: {self.output_directory}")
+        
+        # Create system-based subdirectories and copy files
+        import shutil
+        
+        organized_count = 0
+        for file_info in self.scanned_files:
+            system = file_info.get('system', 'Unknown')
+            system_dir = os.path.join(self.output_directory, system)
+            
+            # Create system directory if it doesn't exist
+            os.makedirs(system_dir, exist_ok=True)
+            
+            # Copy file to system directory
+            try:
+                source_path = file_info['path']
+                dest_path = os.path.join(system_dir, file_info['filename'])
+                
+                if not os.path.exists(dest_path):
+                    shutil.copy2(source_path, dest_path)
+                    organized_count += 1
+                    logger.info(f"Organized: {file_info['filename']} -> {system}/")
+            except Exception as e:
+                logger.error(f"Error organizing {file_info['filename']}: {e}")
+        
+        logger.info(f"Successfully organized {organized_count} ROM files")
+    
     @staticmethod
     def _format_size(size_bytes: int) -> str:
         """Format file size for display."""
@@ -181,8 +284,64 @@ class ArchiveTab(QWidget):
     def _setup_ui(self):
         """Setup UI elements."""
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("Archive processing features coming soon"))
+        
+        # Folder selection
+        folder_group = QGroupBox("Archive Processing Configuration")
+        folder_layout = QVBoxLayout()
+        
+        # Input folder for archives
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel("Archive Input Folder:"))
+        self.input_label = QLineEdit()
+        self.input_label.setReadOnly(True)
+        self.input_label.setPlaceholderText("No folder selected")
+        input_layout.addWidget(self.input_label)
+        input_browse_btn = QPushButton("Browse...")
+        input_browse_btn.clicked.connect(self.browse_input_directory)
+        input_layout.addWidget(input_browse_btn)
+        folder_layout.addLayout(input_layout)
+        
+        # Output folder for extracted ROMs
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("Output Folder (Extracted ROMs):"))
+        self.output_label = QLineEdit()
+        self.output_label.setReadOnly(True)
+        self.output_label.setPlaceholderText("No folder selected")
+        output_layout.addWidget(self.output_label)
+        output_browse_btn = QPushButton("Browse...")
+        output_browse_btn.clicked.connect(self.browse_output_directory)
+        output_layout.addWidget(output_browse_btn)
+        folder_layout.addLayout(output_layout)
+        
+        folder_group.setLayout(folder_layout)
+        layout.addWidget(folder_group)
+        
+        layout.addWidget(QLabel("Archive extraction and processing features coming soon"))
+        layout.addStretch()
+        
         self.setLayout(layout)
+    
+    def browse_input_directory(self):
+        """Browse for input archive directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Archive Input Folder",
+            os.path.expanduser("~")
+        )
+        if directory:
+            self.input_label.setText(directory)
+            logger.info(f"Archive input directory set to: {directory}")
+    
+    def browse_output_directory(self):
+        """Browse for output directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self, 
+            "Select Output Folder for Extracted ROMs",
+            os.path.expanduser("~")
+        )
+        if directory:
+            self.output_label.setText(directory)
+            logger.info(f"Archive output directory set to: {directory}")
 
 
 class ResultsTab(QWidget):
